@@ -1,0 +1,404 @@
+import { Sky, Sound } from "./fx.js";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const ROUNDS = 5;
+
+const TIERS = {
+  supernova: { name: "Supernova", pts: 100, c: "var(--t-supernova)", hex: ["#FFF6D6", "#FFD36B", "#FF9A5A", "#FFFFFF"], emoji: "🌟", sub: "Only you found it" },
+  nebula:    { name: "Nebula",    pts: 75,  c: "var(--t-nebula)",    hex: ["#E9D5FF", "#C690FF", "#8F5BFF"],            emoji: "🟣", sub: "5% or fewer" },
+  comet:     { name: "Comet",     pts: 50,  c: "var(--t-comet)",     hex: ["#D6FAFF", "#5EE3FF", "#2FA8FF"],            emoji: "🔵", sub: "5–15%" },
+  moon:      { name: "Moon",      pts: 25,  c: "var(--t-moon)",      hex: ["#FFFFFF", "#C3CEEA"],                       emoji: "⚪", sub: "15–35%" },
+  satellite: { name: "Satellite", pts: 10,  c: "var(--t-satellite)", hex: ["#9AA7CC", "#7484AE"],                       emoji: "▫️", sub: "Over 35%" },
+};
+const HOLE = { name: "Black hole", pts: 0, c: "var(--t-hole)", hex: ["#FFB3BE", "#FF6B7F"], emoji: "⚫" };
+const tierOf = (r) => (r && r.tier ? TIERS[r.tier] : HOLE);
+
+const ERRORS = {
+  same_word: "Use a different word than the two in the sky.",
+  not_a_word: "That doesn't look like a real word.",
+  length: "Use 2 to 30 letters.",
+  empty: "Type a word first.",
+  finished: "You've already played today's sky.",
+  network: "Can't reach the server. Check your connection and try again.",
+};
+
+// ---------- player id ----------
+let PID = null;
+try { PID = localStorage.getItem("mg.player"); } catch {}
+if (!PID || !/^[A-Za-z0-9-]{8,64}$/.test(PID)) {
+  PID = (crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join(""));
+  try { localStorage.setItem("mg.player", PID); } catch {}
+}
+
+async function api(path, body) {
+  let r;
+  try {
+    r = body
+      ? await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ p: PID, ...body }) })
+      : await fetch(`${path}${path.includes("?") ? "&" : "?"}p=${encodeURIComponent(PID)}`);
+  } catch { throw Object.assign(new Error("network"), { code: "network" }); }
+  const j = await r.json().catch(() => ({ error: "server_error" }));
+  if (!r.ok) throw Object.assign(new Error(j.error || "error"), { code: j.error || "server_error", status: r.status });
+  return j;
+}
+
+let toastT = 0;
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3600); }
+
+// ---------- screens ----------
+let screen = "home";
+function show(name) {
+  screen = name;
+  for (const s of ["home", "round", "reveal", "results", "judge"]) $("s-" + s).hidden = s !== name;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+const pipsHTML = (cur) => Array.from({ length: ROUNDS }, (_, i) => `<span class="${i < cur ? "done" : i === cur ? "now" : ""}"></span>`).join("");
+
+// ---------- state ----------
+let S = null;          // last /api/state
+let offset = 0;        // server time - local time
+
+function countUp(el, to, ms = 900, onStep) {
+  const from = Number(el.textContent) || 0, t0 = performance.now();
+  return new Promise((res) => {
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / ms), v = Math.round(from + (to - from) * (1 - (1 - k) ** 3));
+      if (String(v) !== el.textContent) { el.textContent = v; onStep && onStep(v); }
+      if (k < 1) requestAnimationFrame(step); else res();
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+function renderLegend() {
+  $("legend").innerHTML = Object.values(TIERS).map((t) =>
+    `<div class="lg"><span class="dot" style="--c:${t.c}"></span><span><span class="lg-name" style="color:${t.c}">${t.name}</span><br><span class="lg-sub">${t.sub}</span></span><span class="lg-pts">${t.pts}</span></div>`).join("") +
+    `<div class="lg"><span class="dot" style="--c:${HOLE.c}"></span><span><span class="lg-name" style="color:${HOLE.c}">Black hole</span><br><span class="lg-sub">Doesn't link both</span></span><span class="lg-pts">0</span></div>`;
+}
+
+async function loadHome() {
+  renderLegend();
+  try {
+    S = await api("/api/state");
+  } catch (e) {
+    $("play-label").textContent = "Try again";
+    $("play").disabled = false;
+    $("play").onclick = () => location.reload();
+    toast(ERRORS[e.code] || "Something went wrong loading today's sky.");
+    return;
+  }
+  offset = (S.now || Date.now()) - Date.now();
+  $("meta").textContent = `Sky #${S.no}`;
+  $("name-input").value = S.name || S.defaultName;
+  const stats = [`<span class="stat"><b>${S.players}</b> ${S.players === 1 ? "player" : "players"} today</span>`];
+  if (S.streak > 0) stats.push(`<span class="stat">🔥 <b>${S.streak}</b>-day streak</span>`);
+  $("home-stats").innerHTML = stats.join("");
+  const btn = $("play");
+  btn.disabled = false; btn.classList.add("pulse");
+  if (S.completed >= ROUNDS) { $("play-label").textContent = "See today's results"; btn.onclick = () => openResults(); }
+  else { $("play-label").textContent = S.completed || S.current ? "Continue today's sky" : "Play today's sky"; btn.onclick = () => { Sound.unlock(); Sound.start(); Sky.warp(1); playNext(); }; }
+}
+
+// ---------- round ----------
+let R = null, raf = 0, busy = false, lastSec = -1;
+const A_PT = [16, 18], B_PT = [84, 18], C_PT = [50, 46.8];
+
+async function playNext() {
+  let d;
+  try { d = await api("/api/start", {}); }
+  catch (e) { if (e.code === "finished") return openResults(); toast(ERRORS[e.code] || "Couldn't start the round."); return; }
+  offset = d.now - Date.now();
+  R = { round: d.round, pair: d.pair, deadline: d.deadline - offset };
+  busy = false; lastSec = -1;
+  $("pips").innerHTML = pipsHTML(d.round);
+  $("round-label").textContent = `Pair ${d.round + 1} of ${ROUNDS}`;
+  $("w-a").textContent = d.pair[0]; $("w-b").textContent = d.pair[1];
+  for (const id of ["star-a", "star-b"]) { const el = $(id); el.classList.remove("in"); void el.offsetWidth; el.classList.add("in"); }
+  $("core").classList.remove("lit", "low");
+  document.querySelector(".links").classList.remove("locked");
+  setLinks(0);
+  $("ans").value = ""; $("ans").disabled = false; $("lock").disabled = false; $("ans-err").textContent = "";
+  show("round");
+  setTimeout(() => { $("ans").focus(); }, 350);
+  cancelAnimationFrame(raf); tick();
+}
+function setLinks(p) {
+  const la = $("link-a"), lb = $("link-b");
+  la.setAttribute("x2", A_PT[0] + (C_PT[0] - A_PT[0]) * p); la.setAttribute("y2", A_PT[1] + (C_PT[1] - A_PT[1]) * p);
+  lb.setAttribute("x2", B_PT[0] + (C_PT[0] - B_PT[0]) * p); lb.setAttribute("y2", B_PT[1] + (C_PT[1] - B_PT[1]) * p);
+}
+function tick() {
+  const total = (S?.secs || 30) * 1000;
+  const left = Math.max(0, R.deadline - Date.now());
+  $("ring").style.strokeDashoffset = String(289.03 * (1 - left / total));
+  const sec = Math.ceil(left / 1000);
+  $("timer-num").textContent = sec;
+  $("core").classList.toggle("low", left < 8000);
+  if (sec !== lastSec) { if (sec <= 5 && sec > 0) Sound.tick(); lastSec = sec; }
+  if (left <= 0) { submit(true); return; }
+  raf = requestAnimationFrame(tick);
+}
+$("ans").addEventListener("input", () => {
+  $("ans-err").textContent = "";
+  const n = $("ans").value.trim().length;
+  setLinks(Math.min(0.9, n / 7));
+  if (n) { Sound.key(); const [x, y] = Sky.centerOf($("core")); Sky.sparkle(x + (Math.random() - 0.5) * 30, y - 20); }
+});
+$("ans-form").addEventListener("submit", (e) => { e.preventDefault(); submit(false); });
+
+async function submit(timeUp) {
+  if (busy) return;
+  const answer = $("ans").value.trim();
+  if (!timeUp && !answer) { fail("empty"); return; }
+  busy = true;
+  $("lock").disabled = true;
+  let res;
+  try { res = await api("/api/answer", { round: R.round, answer, timeUp }); }
+  catch (e) {
+    busy = false; $("lock").disabled = false;
+    if (e.status === 422 && !timeUp) { fail(e.code); return; }
+    if (e.code === "already_answered" || e.code === "not_started") { cancelAnimationFrame(raf); return playNext(); }
+    toast(ERRORS[e.code] || "Couldn't send that answer. Try again.");
+    if (timeUp) { busy = true; await wait(1500); busy = false; submit(true); }
+    return;
+  }
+  cancelAnimationFrame(raf);
+  $("ans").disabled = true;
+  if (res.result.raw) {
+    document.querySelector(".links").classList.add("locked");
+    setLinks(1);
+    $("core").classList.add("lit");
+    Sound.lock();
+    const [x, y] = Sky.centerOf($("core"));
+    Sky.burst(x, y, ["#FFE7A3", "#FFFFFF", "#8FD3FF"], 50, 0.45);
+    await wait(750);
+  } else {
+    Sound.err(); await wait(350);
+  }
+  reveal(res);
+}
+function fail(code) {
+  Sound.err();
+  $("ans-err").textContent = ERRORS[code] || "Try a different word.";
+  const f = $("ans-form"); f.classList.remove("shake"); void f.offsetWidth; f.classList.add("shake");
+  $("ans").focus();
+}
+
+// ---------- reveal ----------
+async function reveal({ result, top }) {
+  const i = result.round, last = i === ROUNDS - 1;
+  $("pips2").innerHTML = pipsHTML(i + 1);
+  $("rv-pair").textContent = `${result.pair[0]} · ${result.pair[1]}`;
+  const ans = $("rv-ans");
+  ans.textContent = result.raw || (result.status === "missed" ? "Time ran out" : "No answer");
+  ans.className = "rv-answer" + (result.raw ? "" : " miss");
+  const tierEl = $("rv-tier"), ptsEl = $("rv-pts"), cnt = $("rv-count");
+  tierEl.innerHTML = ""; tierEl.className = "rv-tier"; ptsEl.textContent = ""; $("rv-note").textContent = "";
+  cnt.innerHTML = "&nbsp;";
+  $("rv-top").innerHTML = ""; $("rv-top-wrap").hidden = true;
+  const next = $("rv-next");
+  next.textContent = last ? "See my constellation" : "Next pair";
+  next.disabled = true;
+  show("reveal");
+  await wait(450);
+
+  if (result.raw) {
+    cnt.innerHTML = `<span id="cnt-n">0</span> of ${result.total} ${result.total === 1 ? "player" : "players"} said this`;
+    await countUp($("cnt-n"), result.n, Math.min(900, 200 + result.n * 60), (v) => Sound.count(v % 12));
+    await wait(250);
+  }
+  const t = tierOf(result);
+  tierEl.style.setProperty("--c", t.c);
+  tierEl.innerHTML = `<span class="dot" style="--c:${t.c}"></span>${t.name}`;
+  void tierEl.offsetWidth; tierEl.classList.add("in");
+  ptsEl.style.setProperty("--c", t.c);
+  ptsEl.textContent = "+0";
+  Sound.tier(result.tier);
+  const [x, y] = Sky.centerOf(tierEl);
+  if (result.tier === "supernova") {
+    Sky.flash(0.85); Sky.shake(1);
+    Sky.ring(x, y, "#FFE7A3", Math.max(innerWidth, innerHeight) * 0.6, 1200);
+    setTimeout(() => Sky.ring(x, y, "#C690FF", Math.max(innerWidth, innerHeight) * 0.4, 1000), 150);
+    Sky.burst(x, y, t.hex, 220, 1.1, { size: 3, ttl: 1400, drag: 0.975 });
+  } else if (result.tier === "nebula") {
+    Sky.shake(0.4); Sky.ring(x, y, "#C690FF", 320, 1000);
+    Sky.burst(x, y, t.hex, 120, 0.8, { size: 2.6, ttl: 1200 });
+  } else if (result.tier === "comet") {
+    Sky.ring(x, y, "#5EE3FF", 220, 900); Sky.burst(x, y, t.hex, 70, 0.6);
+  } else if (result.tier) {
+    Sky.burst(x, y, t.hex, result.tier === "moon" ? 34 : 14, 0.35);
+  } else {
+    Sky.burst(x, y, ["#FF6B7F", "#552030"], 30, -0.35, { g: 0, drag: 0.94 });   // implode
+  }
+  await countUp(ptsEl, t.pts, 700).catch(() => {});
+  ptsEl.textContent = `+${t.pts}`;
+
+  const notes = {
+    pending: "Nobody else found this one yet. Other players will vote on whether it links both words.",
+    rejected: "Other players voted that this doesn't link both words.",
+    missed: "The stars drifted apart before you locked in a link.",
+  };
+  $("rv-note").textContent = notes[result.status] || (result.tier === "satellite" ? "A popular link. Everyone could see this one coming." : "");
+
+  if (top && top.length) {
+    $("rv-top-wrap").hidden = false;
+    $("rv-top").innerHTML = barsHTML(top, result.raw);
+    requestAnimationFrame(() => document.querySelectorAll("#rv-top .fl").forEach((f) => (f.style.width = f.dataset.w + "%")));
+  }
+  next.disabled = false;
+  next.focus({ preventScroll: true });
+}
+function barsHTML(top, mine) {
+  const mk = String(mine || "").toLowerCase();
+  return top.map((b, k) => `<div class="bar${b.label.toLowerCase() === mk || b.key === mk ? " mine" : ""}" style="animation-delay:${k * 80}ms"><span class="nm">${esc(b.label)}</span><span class="tr"><span class="fl" data-w="${b.pct}" style="width:${b.pct}%"></span></span><span class="pc">${b.pct}%</span></div>`).join("");
+}
+$("rv-next").addEventListener("click", () => {
+  const done = $("pips2").querySelectorAll(".done").length;
+  if (done >= ROUNDS) openResults(); else { Sky.warp(0.6); playNext(); }
+});
+
+// ---------- results ----------
+let RES = null, judgeCount = 0;
+const CPTS = [[10, 40], [30, 14], [50, 34], [70, 12], [90, 30]];
+
+async function openResults() {
+  try { RES = await api("/api/results"); }
+  catch (e) { if (e.code === "not_finished") return playNext(); toast(ERRORS[e.code] || "Couldn't load your results."); return; }
+  $("meta").textContent = `Sky #${RES.no}`;
+  show("results");
+  drawConstellation(RES.rounds);
+  $("res-score").textContent = "0";
+  setTimeout(() => countUp($("res-score"), RES.score, 1600, (v) => { if (v % 20 === 0) Sound.count(v / 20); }), 900);
+  const st = [`<span class="stat">Rank <b>#${RES.rank}</b> of ${RES.finished}</span>`];
+  if (RES.streak > 0) st.push(`<span class="stat">🔥 <b>${RES.streak}</b>-day streak</span>`);
+  $("res-stats").innerHTML = st.join("");
+  $("res-rows").innerHTML = RES.rounds.map((r, k) => {
+    const t = tierOf(r);
+    const who = r.raw ? `${r.n} of ${r.total} ${r.total === 1 ? "player" : "players"}` : "";
+    const status = r.status === "pending" ? "waiting on votes" : r.status === "rejected" ? "voted out" : r.status === "missed" ? "time ran out" : "";
+    return `<div class="row" style="--c:${t.c};animation-delay:${1.2 + k * 0.08}s">
+      <div class="row-head"><span class="dot" style="--c:${t.c}"></span><span class="row-pair">${esc(r.pair[0])} · ${esc(r.pair[1])}</span><span class="row-pts">${t.pts}</span>
+      <span class="row-ans${r.raw ? "" : " miss"}">${r.raw ? esc(r.raw) : "No answer"}</span></div>
+      <div class="row-sub"><span class="tname">${t.name}</span>${who ? `<span>${who}</span>` : ""}${status ? `<span>${status}</span>` : ""}</div>
+      ${r.top && r.top.length ? `<details><summary>What everyone said</summary><div class="bars">${barsHTML(r.top, r.raw)}</div></details>` : ""}
+    </div>`;
+  }).join("");
+  $("lb").innerHTML = RES.leaderboard.length
+    ? RES.leaderboard.map((p) => `<li class="${p.me ? "me" : ""}"><span class="rk">#${p.rank}</span><span class="nm">${esc(p.name)}</span><span class="sc">${p.score}</span></li>`).join("")
+    : `<li><span class="empty">You're the first to finish today.</span></li>`;
+  try {
+    const j = await api("/api/judge");
+    judgeQueue = j.items; judgeCount = j.items.length;
+  } catch { judgeQueue = []; judgeCount = 0; }
+  const jb = $("judge-btn");
+  jb.hidden = judgeCount === 0;
+  jb.textContent = `Judge ${judgeCount} rare ${judgeCount === 1 ? "link" : "links"}`;
+}
+
+function drawConstellation(rounds) {
+  const svg = $("constellation");
+  let h = `<defs>${Object.entries({ ...TIERS, hole: HOLE }).map(([k, t]) => `<radialGradient id="cg-${k}"><stop offset="0" stop-color="#fff"/><stop offset=".35" stop-color="${t.hex[1] || t.hex[0]}"/><stop offset="1" stop-color="${t.hex[1] || t.hex[0]}" stop-opacity="0"/></radialGradient>`).join("")}</defs>`;
+  for (let i = 0; i < CPTS.length - 1; i++) {
+    const [x1, y1] = CPTS[i], [x2, y2] = CPTS[i + 1], len = Math.hypot(x2 - x1, y2 - y1).toFixed(1);
+    const hole = !rounds[i]?.tier || !rounds[i + 1]?.tier;
+    h += `<line class="cl" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="--len:${len};animation-delay:${0.25 + i * 0.22}s;${hole ? "stroke-dasharray:1 1.2;stroke:rgba(160,180,230,.35);stroke-dashoffset:0;animation:fadein .5s " + (0.25 + i * 0.22) + "s forwards;opacity:0" : ""}"/>`;
+  }
+  rounds.forEach((r, i) => {
+    const [x, y] = CPTS[i], k = r.tier || "hole";
+    const size = { supernova: 7.5, nebula: 6, comet: 5, moon: 4, satellite: 3.2, hole: 2.6 }[k];
+    const d = 0.15 + i * 0.22;
+    h += `<circle class="cs" cx="${x}" cy="${y}" r="${size}" fill="url(#cg-${k})" style="animation-delay:${d}s"/>`;
+    h += `<circle class="cs" cx="${x}" cy="${y}" r="${size * 0.22}" fill="${k === "hole" ? "#2A1020" : "#fff"}" ${k === "hole" ? 'stroke="#FF6B7F" stroke-width=".3"' : ""} style="animation-delay:${d}s"/>`;
+    h += `<text class="ct" x="${x}" y="${y + size * 0.55 + 5}" style="animation-delay:${d + 0.2}s">${esc(r.raw || "—")}</text>`;
+    h += `<text class="cp" x="${x}" y="${y + size * 0.55 + 8.2}" style="animation-delay:${d + 0.2}s">${tierOf(r).pts}</text>`;
+  });
+  svg.innerHTML = h;
+  rounds.forEach((r, i) => setTimeout(() => {
+    if (screen !== "results") return;
+    const b = svg.getBoundingClientRect(), [cx, cy] = CPTS[i];
+    const x = b.left + (cx / 100) * b.width, y = b.top + (cy / 64) * b.height;
+    const t = tierOf(r);
+    if (r.tier) { Sky.burst(x, y, t.hex, r.tier === "supernova" ? 60 : 20, r.tier === "supernova" ? 0.5 : 0.25); Sound.count(i * 2); }
+  }, (0.25 + i * 0.22) * 1000));
+}
+
+function shareText() {
+  const sq = RES.rounds.map((r) => tierOf(r).emoji).join("");
+  return `Middle Ground #${RES.no} ✦ ${RES.score}/500\n${sq}\n${location.origin}`;
+}
+$("share").addEventListener("click", async () => {
+  const txt = shareText(), box = $("sharebox");
+  try {
+    if (navigator.share && matchMedia("(pointer: coarse)").matches) { await navigator.share({ text: txt }); return; }
+    await navigator.clipboard.writeText(txt);
+    $("share").textContent = "Copied!"; setTimeout(() => ($("share").textContent = "Copy my result"), 1600); box.hidden = true;
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+    box.value = txt; box.hidden = false; box.focus(); box.select();
+  }
+});
+
+// ---------- judge ----------
+let judgeQueue = [], judging = false;
+$("judge-btn").addEventListener("click", () => { show("judge"); nextJudge(true); });
+$("judge-done").addEventListener("click", () => openResults());
+function nextJudge(first) {
+  const card = $("jcard");
+  const item = judgeQueue[0];
+  $("jleft").textContent = judgeQueue.length ? `${judgeQueue.length} left` : "";
+  if (!item) {
+    $("jpair").textContent = "All caught up";
+    $("janswer").textContent = "Thanks, judge ✦";
+    $("vote-no").hidden = $("vote-yes").hidden = true;
+    card.className = "jcard in";
+    return;
+  }
+  $("vote-no").hidden = $("vote-yes").hidden = false;
+  $("jpair").textContent = `${item.pair[0]} · ${item.pair[1]}`;
+  $("janswer").textContent = item.label;
+  card.className = "jcard"; void card.offsetWidth; card.className = "jcard in";
+}
+async function vote(val) {
+  if (judging || !judgeQueue.length) return;
+  judging = true;
+  const item = judgeQueue.shift();
+  Sound.vote(val > 0);
+  const card = $("jcard");
+  card.className = "jcard " + (val > 0 ? "out-r" : "out-l");
+  const [x, y] = Sky.centerOf(card);
+  Sky.burst(x, y, val > 0 ? ["#5EE3FF", "#FFFFFF"] : ["#FF6B7F", "#552030"], 26, 0.4);
+  api("/api/vote", { round: item.round, key: item.key, val }).catch(() => toast("That vote didn't go through."));
+  await wait(420);
+  nextJudge();
+  judging = false;
+}
+$("vote-yes").addEventListener("click", () => vote(1));
+$("vote-no").addEventListener("click", () => vote(-1));
+addEventListener("keydown", (e) => {
+  if (screen !== "judge") return;
+  if (e.key === "ArrowRight") vote(1);
+  if (e.key === "ArrowLeft") vote(-1);
+});
+
+// ---------- name, sound, home, countdown ----------
+$("name-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try { const r = await api("/api/name", { name: $("name-input").value }); $("name-input").value = r.name; $("name-msg").textContent = "Saved"; setTimeout(() => ($("name-msg").textContent = ""), 1800); }
+  catch (err) { $("name-msg").textContent = err.code === "name_too_short" ? "Use at least 2 letters." : "Couldn't save the name."; }
+});
+function paintMute() { $("mute-waves").toggleAttribute("hidden", !Sound.on); $("mute-x").toggleAttribute("hidden", Sound.on); $("mute").setAttribute("aria-label", Sound.on ? "Turn sound off" : "Turn sound on"); }
+$("mute").addEventListener("click", () => { Sound.toggle(); paintMute(); });
+paintMute();
+$("home-link").addEventListener("click", () => { if (screen === "round") return; show("home"); loadHome(); });
+
+setInterval(() => {
+  if (!S) return;
+  let s = Math.max(0, Math.floor((S.nextAt - (Date.now() + offset)) / 1000));
+  const h = String(Math.floor(s / 3600)).padStart(2, "0"); s %= 3600;
+  $("countdown").textContent = `${h}:${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  if (Date.now() + offset >= S.nextAt && (screen === "home" || screen === "results")) { S = null; show("home"); loadHome(); }
+}, 1000);
+
+loadHome();

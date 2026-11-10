@@ -4,19 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Middle Ground</title>
-<meta name="description" content="A daily word game. Link two words with one of your own. The rarer your link, the brighter your star.">
+<meta name="description" content="A daily word game. Link two words with one of your own. The harder your link, the higher you launch.">
 <meta property="og:title" content="Middle Ground">
-<meta property="og:description" content="Link two words with one of your own. The rarer your link, the brighter your star.">
+<meta property="og:description" content="Link two words with one of your own. The harder your link, the higher you launch.">
 <meta name="theme-color" content="#060914">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=Silkscreen:wght@400;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <canvas id="sky" aria-hidden="true"></canvas>
+<div class="atmo" id="atmo" aria-hidden="true"></div>
 <div class="vignette" aria-hidden="true"></div>
+
+<!-- drifting pixel sprites (filled by app.js) -->
+<div class="sprites" aria-hidden="true">
+  <div class="sprite astro" id="sp-astro"></div>
+  <div class="sprite sat" id="sp-sat"></div>
+  <div class="sprite planet" id="sp-planet"></div>
+</div>
+
+<!-- altitude gauge (rounds and reveal, wide screens) -->
+<div class="gauge" id="gauge" hidden aria-hidden="true">
+  <div class="gauge-scale" id="gauge-scale"></div>
+  <div class="gauge-rocket" id="gauge-rocket"></div>
+</div>
 
 <div class="app" id="app">
   <header class="top">
@@ -27,26 +41,37 @@
     <div class="top-right">
       <span class="meta" id="meta"></span>
       <button class="icon-btn" id="mute" aria-label="Turn sound off" title="Sound">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path id="mute-waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path id="mute-x" d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" hidden/></svg>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path id="mute-waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="square"/><path id="mute-x" d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" stroke-linecap="square" hidden/></svg>
       </button>
     </div>
   </header>
 
+  <!-- in-game HUD -->
+  <div class="hud" id="hud" hidden>
+    <div class="hud-box"><span class="hud-lbl">Altitude</span><span class="hud-val" id="hud-alt">0 km</span></div>
+    <div class="hud-mid"><div class="hud-pips" id="hud-pips"></div><span class="hud-lbl" id="hud-pair">Pair 1 of 5</span></div>
+    <div class="hud-box right"><span class="hud-lbl">Score</span><span class="hud-val score" id="hud-score">0</span></div>
+  </div>
+
   <!-- HOME -->
   <main id="s-home" class="screen">
     <section class="hero">
-      <svg class="hero-mark" viewBox="0 0 320 120" aria-hidden="true">
-        <defs><radialGradient id="g-core"><stop offset="0" stop-color="#fff"/><stop offset=".35" stop-color="#FFE08A"/><stop offset="1" stop-color="#FFE08A" stop-opacity="0"/></radialGradient>
-        <radialGradient id="g-star"><stop offset="0" stop-color="#fff"/><stop offset=".4" stop-color="#9FD8FF"/><stop offset="1" stop-color="#9FD8FF" stop-opacity="0"/></radialGradient></defs>
-        <path class="hero-line l1" d="M30 40 L160 92"/><path class="hero-line l2" d="M290 28 L160 92"/>
-        <circle cx="30" cy="40" r="22" fill="url(#g-star)" class="hero-glow g1"/><circle cx="290" cy="28" r="22" fill="url(#g-star)" class="hero-glow g2"/>
-        <circle cx="160" cy="92" r="34" fill="url(#g-core)" class="hero-glow g3"/>
-      </svg>
-      <h1 class="title">Find the word<br><span class="grad">in between.</span></h1>
-      <p class="lede">Two words appear in the sky. Type one word that links them both. Every pair hides a star map of answers, and the harder the link, the brighter your star shines.</p>
-      <div class="cta-row">
-        <button class="btn primary" id="play" disabled><span id="play-label">Tuning the telescope…</span></button>
-        <div class="stats-row" id="home-stats"></div>
+      <h1 class="ptitle" data-text="MIDDLE GROUND">MIDDLE GROUND</h1>
+      <p class="subtitle">The daily link</p>
+      <p class="tagline">5 pairs · 30 seconds each · harder links launch higher</p>
+
+      <div class="launchpad">
+        <div class="earth" aria-hidden="true"></div>
+        <div class="pad-rocket" id="pad-rocket" aria-hidden="true"></div>
+        <div class="pad-tower" aria-hidden="true"></div>
+      </div>
+
+      <div class="launch-wrap">
+        <button class="btn launch" id="play" disabled><span id="play-label">Fueling up…</span></button>
+        <div class="launch-meta">
+          <span class="meta" id="sky-no"></span>
+          <div class="stats-row" id="home-stats"></div>
+        </div>
       </div>
     </section>
 
@@ -91,10 +116,11 @@
         <span class="core-num" id="timer-num">30</span>
       </div>
     </div>
+    <p class="hint">▲ harder links launch higher ▲</p>
     <form id="ans-form" class="ans-form" autocomplete="off">
       <label for="ans" class="sr">Your link between the two words</label>
-      <input id="ans" maxlength="30" placeholder="type your link" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
-      <button class="btn primary" type="submit" id="lock">Lock in</button>
+      <input id="ans" maxlength="30" placeholder="type one link…" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
+      <button class="btn link-btn" type="submit" id="lock">Link</button>
     </form>
     <p class="err" id="ans-err" role="alert"></p>
   </main>
@@ -105,7 +131,8 @@
       <div class="pips" id="pips2"></div>
       <span class="meta" id="rv-pair"></span>
     </div>
-    <section class="reveal">
+    <section class="reveal panel">
+      <span class="panel-tag" id="rv-tag">Pair 1 of 5</span>
       <div class="rv-answer" id="rv-ans"></div>
       <div class="rv-count" id="rv-count">&nbsp;</div>
       <div class="rv-tier" id="rv-tier"></div>
@@ -116,7 +143,7 @@
       <h2 class="label">Today's star map</h2>
       <div class="smap" id="rv-top"></div>
     </section>
-    <button class="btn primary" id="rv-next">Next pair</button>
+    <button class="btn launch small" id="rv-next">Next pair</button>
   </main>
 
   <!-- RESULTS -->
@@ -131,7 +158,7 @@
       <p class="fine">Open any pair below to see its full star map.</p>
     </section>
     <div class="actions">
-      <button class="btn primary" id="share">Copy my result</button>
+      <button class="btn launch small" id="share">Copy my result</button>
     </div>
     <textarea class="sharebox" id="sharebox" rows="4" readonly hidden aria-label="Result text to copy"></textarea>
     <section class="rows" id="res-rows"></section>

@@ -48,11 +48,56 @@ async function api(path, body) {
 let toastT = 0;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3600); }
 
+
+// ---------- pixel art ----------
+const PAL = { r: "#FF5D73", w: "#E8EEFF", c: "#5EE3FF", b: "#1A2B5A", g: "#8E9AC4", o: "#FF9A3C", y: "#FFE07A", p: "#C690FF", d: "#7A4FD8", m: "#FF8FB1" };
+function pixelSVG(rows, flame) {
+  const all = flame ? rows.concat(flame) : rows;
+  const W = Math.max(...all.map((r) => r.length)), H = all.length;
+  const rects = (rs, y0) => rs.map((row, y) => [...row].map((ch, x) => PAL[ch] ? `<rect x="${x}" y="${y + y0}" width="1.02" height="1.02" fill="${PAL[ch]}"/>` : "").join("")).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${rects(rows, 0)}${flame ? `<g class="flame" style="transform-box:fill-box;transform-origin:top">${rects(flame, rows.length)}</g>` : ""}</svg>`;
+}
+const ROCKET = ["....rr....","...rrrr...","...wwww...","..wwwwww..","..wwbbww..","..wbccbw..","..wbccbw..","..wwbbww..","..wwwwww..","..wwwwww..","..wggggw..",".rwwwwwwr.","rrwwwwwwrr","rr.gggg.rr"];
+const FLAME = ["...yooy...","...oyyo...","....oo....","....o....."];
+const ASTRO = ["...wwwwww...","..wwwwwwww..",".wwccccccww.",".wcbbbbbbcw.",".wcbbcbbbcw.",".wwccccccww.","..wwwwwwww..",".gwwwmmwwwg.","gwwwwwwwwwwg","g.wwwwwwww.g","...ww..ww...","...gg..gg..."];
+const SAT = ["cccc.......cccc","cbcb...w...cbcb","cccc.gwwwg.cccc","cbcbggwwwggcbcb","cccc.gwwwg.cccc","cbcb...g...cbcb","cccc.......cccc"];
+const PLANET = ["......pppp......","....pppppppp....","...ppddppppdp...","yyyyyyyyyyyyyyyy","...pppppddppp...","....pppppppp....","......pppp......"];
+$("pad-rocket").innerHTML = pixelSVG(ROCKET, FLAME);
+$("gauge-rocket").innerHTML = pixelSVG(ROCKET, FLAME);
+$("sp-astro").innerHTML = pixelSVG(ASTRO);
+$("sp-sat").innerHTML = pixelSVG(SAT);
+$("sp-planet").innerHTML = pixelSVG(PLANET);
+(() => {
+  let h = "";
+  for (let km = 0; km <= 5000; km += 250) {
+    const at = (km / 5000) * 100;
+    h += `<span class="${km % 1000 === 0 ? "major" : ""}" style="bottom:${at}%"></span>`;
+    if (km % 1000 === 0) h += `<b style="bottom:${at}%;transform:translateY(50%)">${km === 0 ? "0" : km / 1000 + "k"} km</b>`;
+  }
+  $("gauge-scale").innerHTML = h;
+})();
+
+// ---------- HUD ----------
+let runScore = 0;
+function setHud(roundIdx, bump) {
+  $("hud-pips").innerHTML = Array.from({ length: ROUNDS }, (_, i) => `<span class="${i < roundIdx ? "done" : i === roundIdx ? "now" : ""}"></span>`).join("");
+  $("hud-pair").textContent = roundIdx < ROUNDS ? `Pair ${roundIdx + 1} of ${ROUNDS}` : "Sky complete";
+  const sc = $("hud-score"), alt = $("hud-alt");
+  sc.textContent = runScore; alt.textContent = `${(runScore * 10).toLocaleString()} km`;
+  if (bump) for (const el of [sc, alt]) { el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); }
+  const prog = Math.min(1, runScore / 500);
+  $("gauge").style.setProperty("--p", prog);
+  document.documentElement.style.setProperty("--atmo", String(Math.max(0.15, 1 - prog * 1.4)));
+}
+
 // ---------- screens ----------
 let screen = "home";
 function show(name) {
   screen = name;
   for (const s of ["home", "round", "reveal", "results"]) $("s-" + s).hidden = s !== name;
+  const inGame = name === "round" || name === "reveal";
+  $("hud").hidden = !inGame; $("gauge").hidden = !inGame;
+  if (name === "home" || name === "results") document.documentElement.style.setProperty("--atmo", name === "home" ? "1" : "0.2");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 const pipsHTML = (cur) => Array.from({ length: ROUNDS }, (_, i) => `<span class="${i < cur ? "done" : i === cur ? "now" : ""}"></span>`).join("");
@@ -92,14 +137,27 @@ async function loadHome() {
   }
   offset = (S.now || Date.now()) - Date.now();
   $("meta").textContent = `Sky #${S.no}`;
+  $("sky-no").textContent = `SKY #${S.no}`;
+  runScore = (S.results || []).reduce((a, r) => a + (r.pts || 0), 0);
+  $("pad-rocket").classList.remove("launching");
   $("name-input").value = S.name || S.defaultName;
   const stats = [`<span class="stat"><b>${S.players}</b> ${S.players === 1 ? "player" : "players"} today</span>`];
   if (S.streak > 0) stats.push(`<span class="stat">🔥 <b>${S.streak}</b>-day streak</span>`);
   $("home-stats").innerHTML = stats.join("");
   const btn = $("play");
   btn.disabled = false; btn.classList.add("pulse");
-  if (S.completed >= ROUNDS) { $("play-label").textContent = "See today's results"; btn.onclick = () => openResults(); }
-  else { $("play-label").textContent = S.completed || S.current ? "Continue today's sky" : "Play today's sky"; btn.onclick = () => { Sound.unlock(); Sound.start(); Sky.warp(1); playNext(); }; }
+  if (S.completed >= ROUNDS) { $("play-label").textContent = "▲ See today's results ▲"; btn.onclick = () => openResults(); }
+  else {
+    $("play-label").textContent = S.completed || S.current ? "▲ Continue launch ▲" : "▲ Begin launch ▲";
+    btn.onclick = () => {
+      btn.disabled = true; Sound.unlock(); Sound.start();
+      $("pad-rocket").classList.add("launching");
+      const [x, y] = Sky.centerOf($("pad-rocket"));
+      Sky.burst(x, y + 30, ["#FFE07A", "#FF9A3C", "#FFFFFF"], 60, 0.35, { g: 0.0008 });
+      setTimeout(() => Sky.warp(1), 350);
+      setTimeout(() => { btn.disabled = false; playNext(); }, 1100);
+    };
+  }
 }
 
 // ---------- round ----------
@@ -114,6 +172,7 @@ async function playNext() {
   R = { round: d.round, pair: d.pair, deadline: d.deadline - offset };
   busy = false; lastSec = -1;
   $("pips").innerHTML = pipsHTML(d.round);
+  setHud(d.round);
   $("round-label").textContent = `Pair ${d.round + 1} of ${ROUNDS}`;
   $("w-a").textContent = d.pair[0]; $("w-b").textContent = d.pair[1];
   for (const id of ["star-a", "star-b"]) { const el = $(id); el.classList.remove("in"); void el.offsetWidth; el.classList.add("in"); }
@@ -191,6 +250,7 @@ function fail(code) {
 async function reveal({ result, map }) {
   const i = result.round, last = i === ROUNDS - 1;
   $("pips2").innerHTML = pipsHTML(i + 1);
+  $("rv-tag").textContent = `Pair ${i + 1} of ${ROUNDS}`;
   $("rv-pair").textContent = `${result.pair[0]} · ${result.pair[1]}`;
   const ans = $("rv-ans");
   ans.textContent = result.raw || (result.status === "missed" ? "Time ran out" : "No answer");
@@ -239,6 +299,8 @@ async function reveal({ result, map }) {
   }
   await countUp(ptsEl, t.pts, 700).catch(() => {});
   ptsEl.textContent = `+${t.pts}`;
+  runScore += t.pts;
+  setHud(i + 1, t.pts > 0);
 
   const notes = {
     off_map: "That link wasn't on the map. See what was hiding in the stars below.",
@@ -284,7 +346,7 @@ async function openResults() {
   drawConstellation(RES.rounds);
   $("res-score").textContent = "0";
   setTimeout(() => countUp($("res-score"), RES.score, 1600, (v) => { if (v % 20 === 0) Sound.count(v / 20); }), 900);
-  const st = [`<span class="stat">Rank <b>#${RES.rank}</b> of ${RES.finished}</span>`];
+  const st = [`<span class="stat">Rank <b>#${RES.rank}</b> of ${RES.finished}</span>`, `<span class="stat">Altitude <b>${(RES.score * 10).toLocaleString()}</b> km</span>`];
   if (RES.streak > 0) st.push(`<span class="stat">🔥 <b>${RES.streak}</b>-day streak</span>`);
   $("res-stats").innerHTML = st.join("");
   $("res-rows").innerHTML = RES.rounds.map((r, k) => {
@@ -332,7 +394,7 @@ function drawConstellation(rounds) {
 
 function shareText() {
   const sq = RES.rounds.map((r) => tierOf(r).emoji).join("");
-  return `Middle Ground #${RES.no} ✦ ${RES.score}/500\n${sq}\n${location.origin}`;
+  return `Middle Ground #${RES.no} ✦ ${RES.score}/500 · 🚀 ${(RES.score * 10).toLocaleString()} km\n${sq}\n${location.origin}`;
 }
 $("share").addEventListener("click", async () => {
   const txt = shareText(), box = $("sharebox");

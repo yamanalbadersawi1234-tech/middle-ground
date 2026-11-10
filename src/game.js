@@ -67,7 +67,8 @@ export function skyFor(day) {
       for (const label of group.split(",").map((x) => x.trim()).filter(Boolean)) {
         const k = keyOf(label);
         if (!k || byKey.has(k) || k.includes(ka) || k.includes(kb) || ka.includes(k) || kb.includes(k)) continue;
-        const e = { key: k, label, tier: TIERS[ti].key };
+        const words = norm(label.replace(/'s\b/g, "s").replace(/[^a-zA-Z0-9 ]/g, " ")).split(" ").map(keyOf).filter((w) => w.length >= 4 && !STOP.has(w));
+        const e = { key: k, label, tier: TIERS[ti].key, words: label.trim().includes(" ") ? words : [] };
         list.push(e); byKey.set(k, e);
       }
     });
@@ -77,12 +78,19 @@ export function skyFor(day) {
   mapCache.set(idx, sky);
   return sky;
 }
+const STOP = new Set(["the","and","with","from","your","that","this","into","over","under","like","than","them","they","what","when","where","which","while","bring"]);
 function matchAnswer(round, raw) {
   const k = keyOf(raw);
   if (!k) return null;
-  if (round.byKey.has(k)) return round.byKey.get(k);
-  if (k.length >= 5) {                                   // forgive one typo on longer words
+  if (round.byKey.has(k)) return round.byKey.get(k);       // exact (plurals, "the", spacing all ignored)
+  if (k.length >= 5) {                                     // forgive one typo on longer words
     for (const e of round.list) if (e.key.length >= 5 && within1(e.key, k)) return e;
+  }
+  // One word that is part of a longer answer: "candy" counts as "candy floss".
+  // Needs 4+ letters; if several answers contain it, the easiest one counts.
+  const single = norm(String(raw).replace(/[^a-zA-Z0-9 ]/g, " ")).split(" ").filter(Boolean);
+  if (single.length === 1 && k.length >= 4 && !STOP.has(k)) {
+    for (const e of round.list) if (e.words.includes(k)) return e;
   }
   return null;
 }

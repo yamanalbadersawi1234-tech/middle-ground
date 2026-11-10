@@ -6,11 +6,11 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const ROUNDS = 5;
 
 const TIERS = {
-  supernova: { name: "Supernova", pts: 100, c: "var(--t-supernova)", hex: ["#FFF6D6", "#FFD36B", "#FF9A5A", "#FFFFFF"], emoji: "🌟", sub: "Only you found it" },
-  nebula:    { name: "Nebula",    pts: 75,  c: "var(--t-nebula)",    hex: ["#E9D5FF", "#C690FF", "#8F5BFF"],            emoji: "🟣", sub: "5% or fewer" },
-  comet:     { name: "Comet",     pts: 50,  c: "var(--t-comet)",     hex: ["#D6FAFF", "#5EE3FF", "#2FA8FF"],            emoji: "🔵", sub: "5–15%" },
-  moon:      { name: "Moon",      pts: 25,  c: "var(--t-moon)",      hex: ["#FFFFFF", "#C3CEEA"],                       emoji: "⚪", sub: "15–35%" },
-  satellite: { name: "Satellite", pts: 10,  c: "var(--t-satellite)", hex: ["#9AA7CC", "#7484AE"],                       emoji: "▫️", sub: "Over 35%" },
+  supernova: { name: "Supernova", pts: 100, c: "var(--t-supernova)", hex: ["#FFF6D6", "#FFD36B", "#FF9A5A", "#FFFFFF"], emoji: "🌟", sub: "The hardest links" },
+  nebula:    { name: "Nebula",    pts: 75,  c: "var(--t-nebula)",    hex: ["#E9D5FF", "#C690FF", "#8F5BFF"],            emoji: "🟣", sub: "Clever links" },
+  comet:     { name: "Comet",     pts: 50,  c: "var(--t-comet)",     hex: ["#D6FAFF", "#5EE3FF", "#2FA8FF"],            emoji: "🔵", sub: "Sharp links" },
+  moon:      { name: "Moon",      pts: 25,  c: "var(--t-moon)",      hex: ["#FFFFFF", "#C3CEEA"],                       emoji: "⚪", sub: "Good links" },
+  satellite: { name: "Satellite", pts: 10,  c: "var(--t-satellite)", hex: ["#9AA7CC", "#7484AE"],                       emoji: "▫️", sub: "The obvious links" },
 };
 const HOLE = { name: "Black hole", pts: 0, c: "var(--t-hole)", hex: ["#FFB3BE", "#FF6B7F"], emoji: "⚫" };
 const tierOf = (r) => (r && r.tier ? TIERS[r.tier] : HOLE);
@@ -21,6 +21,7 @@ const ERRORS = {
   length: "Use 2 to 30 letters.",
   empty: "Type a word first.",
   finished: "You've already played today's sky.",
+  blocked: "Keep it friendly. Try a different word.",
   network: "Can't reach the server. Check your connection and try again.",
 };
 
@@ -51,7 +52,7 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = fals
 let screen = "home";
 function show(name) {
   screen = name;
-  for (const s of ["home", "round", "reveal", "results", "judge"]) $("s-" + s).hidden = s !== name;
+  for (const s of ["home", "round", "reveal", "results"]) $("s-" + s).hidden = s !== name;
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 const pipsHTML = (cur) => Array.from({ length: ROUNDS }, (_, i) => `<span class="${i < cur ? "done" : i === cur ? "now" : ""}"></span>`).join("");
@@ -75,7 +76,7 @@ function countUp(el, to, ms = 900, onStep) {
 function renderLegend() {
   $("legend").innerHTML = Object.values(TIERS).map((t) =>
     `<div class="lg"><span class="dot" style="--c:${t.c}"></span><span><span class="lg-name" style="color:${t.c}">${t.name}</span><br><span class="lg-sub">${t.sub}</span></span><span class="lg-pts">${t.pts}</span></div>`).join("") +
-    `<div class="lg"><span class="dot" style="--c:${HOLE.c}"></span><span><span class="lg-name" style="color:${HOLE.c}">Black hole</span><br><span class="lg-sub">Doesn't link both</span></span><span class="lg-pts">0</span></div>`;
+    `<div class="lg"><span class="dot" style="--c:${HOLE.c}"></span><span><span class="lg-name" style="color:${HOLE.c}">Black hole</span><br><span class="lg-sub">Not on the map</span></span><span class="lg-pts">0</span></div>`;
 }
 
 async function loadHome() {
@@ -187,7 +188,7 @@ function fail(code) {
 }
 
 // ---------- reveal ----------
-async function reveal({ result, top }) {
+async function reveal({ result, map }) {
   const i = result.round, last = i === ROUNDS - 1;
   $("pips2").innerHTML = pipsHTML(i + 1);
   $("rv-pair").textContent = `${result.pair[0]} · ${result.pair[1]}`;
@@ -204,10 +205,14 @@ async function reveal({ result, top }) {
   show("reveal");
   await wait(450);
 
-  if (result.raw) {
-    cnt.innerHTML = `<span id="cnt-n">0</span> of ${result.total} ${result.total === 1 ? "player" : "players"} said this`;
+  if (result.status === "found") {
+    const as = result.matched && result.matched.toLowerCase() !== String(result.raw).toLowerCase() ? ` · counted as <b>${esc(result.matched)}</b>` : "";
+    cnt.innerHTML = `Found by <span id="cnt-n">0</span> of ${result.total} ${result.total === 1 ? "player" : "players"}${as}`;
     await countUp($("cnt-n"), result.n, Math.min(900, 200 + result.n * 60), (v) => Sound.count(v % 12));
     await wait(250);
+  } else if (result.status === "off_map") {
+    cnt.textContent = "Not on today's star map";
+    await wait(400);
   }
   const t = tierOf(result);
   tierEl.style.setProperty("--c", t.c);
@@ -236,23 +241,31 @@ async function reveal({ result, top }) {
   ptsEl.textContent = `+${t.pts}`;
 
   const notes = {
-    pending: "Nobody else found this one yet. Other players will vote on whether it links both words.",
-    rejected: "Other players voted that this doesn't link both words.",
+    off_map: "That link wasn't on the map. See what was hiding in the stars below.",
     missed: "The stars drifted apart before you locked in a link.",
   };
-  $("rv-note").textContent = notes[result.status] || (result.tier === "satellite" ? "A popular link. Everyone could see this one coming." : "");
+  const tierNotes = { supernova: "One of the hardest links on the map!", nebula: "A clever one. Few people find this.", satellite: "The obvious link. Everyone could see this one coming." };
+  $("rv-note").textContent = notes[result.status] || tierNotes[result.tier] || "";
 
-  if (top && top.length) {
+  if (map && map.length) {
     $("rv-top-wrap").hidden = false;
-    $("rv-top").innerHTML = barsHTML(top, result.raw);
-    requestAnimationFrame(() => document.querySelectorAll("#rv-top .fl").forEach((f) => (f.style.width = f.dataset.w + "%")));
+    $("rv-top").innerHTML = mapHTML(map);
   }
   next.disabled = false;
   next.focus({ preventScroll: true });
 }
-function barsHTML(top, mine) {
-  const mk = String(mine || "").toLowerCase();
-  return top.map((b, k) => `<div class="bar${b.label.toLowerCase() === mk || b.key === mk ? " mine" : ""}" style="animation-delay:${k * 80}ms"><span class="nm">${esc(b.label)}</span><span class="tr"><span class="fl" data-w="${b.pct}" style="width:${b.pct}%"></span></span><span class="pc">${b.pct}%</span></div>`).join("");
+// The full star map, rarest tier first.
+function mapHTML(map) {
+  const order = ["supernova", "nebula", "comet", "moon", "satellite"];
+  return order.map((k, gi) => {
+    const items = map.filter((e) => e.tier === k);
+    if (!items.length) return "";
+    const t = TIERS[k];
+    return `<div class="smap-group" style="--c:${t.c};animation-delay:${gi * 90}ms">
+      <div class="smap-head"><span class="dot" style="--c:${t.c}"></span><span class="smap-name">${t.name}</span><span class="smap-pts">${t.pts}</span></div>
+      <div class="smap-items">${items.map((e) => `<span class="smap-item${e.mine ? " mine" : ""}${e.pct ? "" : " unfound"}">${esc(e.label)}<span class="smap-pct">${e.pct}%</span></span>`).join("")}</div>
+    </div>`;
+  }).join("");
 }
 $("rv-next").addEventListener("click", () => {
   const done = $("pips2").querySelectorAll(".done").length;
@@ -260,7 +273,7 @@ $("rv-next").addEventListener("click", () => {
 });
 
 // ---------- results ----------
-let RES = null, judgeCount = 0;
+let RES = null;
 const CPTS = [[10, 40], [30, 14], [50, 34], [70, 12], [90, 30]];
 
 async function openResults() {
@@ -276,25 +289,18 @@ async function openResults() {
   $("res-stats").innerHTML = st.join("");
   $("res-rows").innerHTML = RES.rounds.map((r, k) => {
     const t = tierOf(r);
-    const who = r.raw ? `${r.n} of ${r.total} ${r.total === 1 ? "player" : "players"}` : "";
-    const status = r.status === "pending" ? "waiting on votes" : r.status === "rejected" ? "voted out" : r.status === "missed" ? "time ran out" : "";
+    const who = r.status === "found" ? `found by ${r.n} of ${r.total} ${r.total === 1 ? "player" : "players"}` : "";
+    const status = r.status === "off_map" ? "not on the map" : r.status === "missed" ? "time ran out" : "";
     return `<div class="row" style="--c:${t.c};animation-delay:${1.2 + k * 0.08}s">
       <div class="row-head"><span class="dot" style="--c:${t.c}"></span><span class="row-pair">${esc(r.pair[0])} · ${esc(r.pair[1])}</span><span class="row-pts">${t.pts}</span>
       <span class="row-ans${r.raw ? "" : " miss"}">${r.raw ? esc(r.raw) : "No answer"}</span></div>
       <div class="row-sub"><span class="tname">${t.name}</span>${who ? `<span>${who}</span>` : ""}${status ? `<span>${status}</span>` : ""}</div>
-      ${r.top && r.top.length ? `<details><summary>What everyone said</summary><div class="bars">${barsHTML(r.top, r.raw)}</div></details>` : ""}
+      ${r.map && r.map.length ? `<details><summary>See the star map</summary><div class="smap">${mapHTML(r.map)}</div></details>` : ""}
     </div>`;
   }).join("");
   $("lb").innerHTML = RES.leaderboard.length
     ? RES.leaderboard.map((p) => `<li class="${p.me ? "me" : ""}"><span class="rk">#${p.rank}</span><span class="nm">${esc(p.name)}</span><span class="sc">${p.score}</span></li>`).join("")
     : `<li><span class="empty">You're the first to finish today.</span></li>`;
-  try {
-    const j = await api("/api/judge");
-    judgeQueue = j.items; judgeCount = j.items.length;
-  } catch { judgeQueue = []; judgeCount = 0; }
-  const jb = $("judge-btn");
-  jb.hidden = judgeCount === 0;
-  jb.textContent = `Judge ${judgeCount} rare ${judgeCount === 1 ? "link" : "links"}`;
 }
 
 function drawConstellation(rounds) {
@@ -340,53 +346,11 @@ $("share").addEventListener("click", async () => {
   }
 });
 
-// ---------- judge ----------
-let judgeQueue = [], judging = false;
-$("judge-btn").addEventListener("click", () => { show("judge"); nextJudge(true); });
-$("judge-done").addEventListener("click", () => openResults());
-function nextJudge(first) {
-  const card = $("jcard");
-  const item = judgeQueue[0];
-  $("jleft").textContent = judgeQueue.length ? `${judgeQueue.length} left` : "";
-  if (!item) {
-    $("jpair").textContent = "All caught up";
-    $("janswer").textContent = "Thanks, judge ✦";
-    $("vote-no").hidden = $("vote-yes").hidden = true;
-    card.className = "jcard in";
-    return;
-  }
-  $("vote-no").hidden = $("vote-yes").hidden = false;
-  $("jpair").textContent = `${item.pair[0]} · ${item.pair[1]}`;
-  $("janswer").textContent = item.label;
-  card.className = "jcard"; void card.offsetWidth; card.className = "jcard in";
-}
-async function vote(val) {
-  if (judging || !judgeQueue.length) return;
-  judging = true;
-  const item = judgeQueue.shift();
-  Sound.vote(val > 0);
-  const card = $("jcard");
-  card.className = "jcard " + (val > 0 ? "out-r" : "out-l");
-  const [x, y] = Sky.centerOf(card);
-  Sky.burst(x, y, val > 0 ? ["#5EE3FF", "#FFFFFF"] : ["#FF6B7F", "#552030"], 26, 0.4);
-  api("/api/vote", { round: item.round, key: item.key, val }).catch(() => toast("That vote didn't go through."));
-  await wait(420);
-  nextJudge();
-  judging = false;
-}
-$("vote-yes").addEventListener("click", () => vote(1));
-$("vote-no").addEventListener("click", () => vote(-1));
-addEventListener("keydown", (e) => {
-  if (screen !== "judge") return;
-  if (e.key === "ArrowRight") vote(1);
-  if (e.key === "ArrowLeft") vote(-1);
-});
-
 // ---------- name, sound, home, countdown ----------
 $("name-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   try { const r = await api("/api/name", { name: $("name-input").value }); $("name-input").value = r.name; $("name-msg").textContent = "Saved"; setTimeout(() => ($("name-msg").textContent = ""), 1800); }
-  catch (err) { $("name-msg").textContent = err.code === "name_too_short" ? "Use at least 2 letters." : "Couldn't save the name."; }
+  catch (err) { $("name-msg").textContent = err.code === "name_too_short" ? "Use at least 2 letters." : err.code === "name_blocked" ? "Please pick a friendlier name." : "Couldn't save the name."; }
 });
 function paintMute() { $("mute-waves").toggleAttribute("hidden", !Sound.on); $("mute-x").toggleAttribute("hidden", Sound.on); $("mute").setAttribute("aria-label", Sound.on ? "Turn sound off" : "Turn sound on"); }
 $("mute").addEventListener("click", () => { Sound.toggle(); paintMute(); });

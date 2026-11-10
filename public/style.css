@@ -214,3 +214,18 @@ p{margin:0}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* star map */
+.smap{display:flex;flex-direction:column;gap:14px}
+.smap-group{display:flex;flex-direction:column;gap:8px;opacity:0;animation:barin .5s ease-out forwards}
+.smap-head{display:flex;align-items:center;gap:8px}
+.smap-head .dot{width:10px;height:10px}
+.smap-name{font-weight:700;color:var(--c);font-size:.9rem}
+.smap-pts{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.smap-items{display:flex;flex-wrap:wrap;gap:6px}
+.smap-item{display:inline-flex;align-items:baseline;gap:6px;padding:5px 11px;border-radius:999px;background:var(--panel);border:1px solid var(--panel-line);font-size:.9rem;font-weight:600}
+.smap-item.unfound{color:var(--muted);font-weight:500}
+.smap-pct{font-family:var(--mono);font-size:.72rem;color:var(--muted);font-weight:500}
+.smap-item.mine{border-color:var(--c);color:var(--c);box-shadow:0 0 16px -4px var(--c);background:rgba(255,255,255,.04)}
+.row details .smap{margin-top:12px}
+.row details .smap-group{opacity:1;animation:none}

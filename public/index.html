@@ -43,7 +43,7 @@
         <circle cx="160" cy="92" r="34" fill="url(#g-core)" class="hero-glow g3"/>
       </svg>
       <h1 class="title">Find the word<br><span class="grad">in between.</span></h1>
-      <p class="lede">Two words appear in the sky. Type one word that links them both. The fewer people who think of your link, the brighter your star shines.</p>
+      <p class="lede">Two words appear in the sky. Type one word that links them both. Every pair hides a star map of answers, and the harder the link, the brighter your star shines.</p>
       <div class="cta-row">
         <button class="btn primary" id="play" disabled><span id="play-label">Tuning the telescope…</span></button>
         <div class="stats-row" id="home-stats"></div>
@@ -53,13 +53,13 @@
     <section class="how">
       <div class="how-step"><span class="how-n">5</span><p>pairs a day, the same for everyone on Earth</p></div>
       <div class="how-step"><span class="how-n">30s</span><p>for each link before the stars drift apart</p></div>
-      <div class="how-step"><span class="how-n">500</span><p>points for five links nobody else found</p></div>
+      <div class="how-step"><span class="how-n">500</span><p>points if you find five Supernova links</p></div>
     </section>
 
     <section class="legend-wrap">
       <h2 class="label">How bright is your link?</h2>
       <div class="legend" id="legend"></div>
-      <p class="fine">Rare answers nobody else gave get checked by other players. Links that don't connect both words fall into a black hole and score 0.</p>
+      <p class="fine">After each pair you see the whole star map: every answer that was hiding there, and how many players found it. Answers that aren't on the map fall into a black hole and score 0.</p>
     </section>
 
     <section class="name-row">
@@ -113,8 +113,8 @@
       <p class="rv-note" id="rv-note"></p>
     </section>
     <section class="top-list" id="rv-top-wrap">
-      <h2 class="label">What everyone said so far</h2>
-      <div class="bars" id="rv-top"></div>
+      <h2 class="label">Today's star map</h2>
+      <div class="smap" id="rv-top"></div>
     </section>
     <button class="btn primary" id="rv-next">Next pair</button>
   </main>
@@ -128,11 +128,10 @@
         <span class="score-big" id="res-score">0</span><span class="score-of">/ 500</span>
       </div>
       <div class="stats-row" id="res-stats"></div>
-      <p class="fine">Scores keep shifting until midnight UTC as more people play and vote.</p>
+      <p class="fine">Open any pair below to see its full star map.</p>
     </section>
     <div class="actions">
       <button class="btn primary" id="share">Copy my result</button>
-      <button class="btn ghost" id="judge-btn" hidden>Judge rare links</button>
     </div>
     <textarea class="sharebox" id="sharebox" rows="4" readonly hidden aria-label="Result text to copy"></textarea>
     <section class="rows" id="res-rows"></section>
@@ -141,24 +140,6 @@
       <ol class="lb" id="lb"></ol>
     </section>
     <p class="next-line">Next sky in <span class="mono" id="countdown">--:--:--</span></p>
-  </main>
-
-  <!-- JUDGE -->
-  <main id="s-judge" class="screen" hidden>
-    <section class="judge">
-      <span class="label">Other players' rare links</span>
-      <p class="lede small">Does this word link <b>both</b> words? Your votes decide whether rare answers keep their points.</p>
-      <div class="jcard" id="jcard">
-        <div class="jpair" id="jpair"></div>
-        <div class="janswer" id="janswer"></div>
-      </div>
-      <div class="jbtns">
-        <button class="btn vote no" id="vote-no">✕ Doesn't link</button>
-        <button class="btn vote yes" id="vote-yes">✓ Links both</button>
-      </div>
-      <p class="fine" id="jleft"></p>
-      <button class="btn ghost" id="judge-done">Back to my results</button>
-    </section>
   </main>
 
   <div class="toast" id="toast" role="status" hidden></div>
